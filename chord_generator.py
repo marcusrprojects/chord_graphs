@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import networkx as nx
 from matplotlib.backends.backend_pdf import PdfPages
 import logging
+import re # Import regex module for sanitizing filenames
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -50,7 +51,12 @@ def generate_chord_structure(root, chord_type, inversion=0):
 
     # Apply inversion
     num_notes = len(chord_intervals)
-    actual_inversion = inversion % num_notes
+    # Ensure inversion is valid for the number of notes (e.g., inversion 3 doesn't exist for a triad)
+    if inversion >= num_notes:
+         raise ValueError(f"Inversion {inversion} is invalid for a {num_notes}-note chord ({chord_type})")
+    
+    actual_inversion = inversion # No modulo needed if we validate first
+
     for _ in range(actual_inversion):
          # Pop lowest note and add 12 semitones (octave up)
         chord_intervals.append(chord_intervals.pop(0) + 12)
@@ -93,10 +99,8 @@ def plot_chord_diagram(chord_note_names, key_colors, title):
     node_ids = list(graph.nodes())
     for i in range(len(node_ids) - 1):
         graph.add_edge(node_ids[i], node_ids[i+1])
-    # Optional: Connect first and last node for a cycle
-    # if len(node_ids) > 1:
-    #    graph.add_edge(node_ids[-1], node_ids[0])
 
+    # Create a new figure for each plot
     plt.figure(figsize=(8, 4)) # Adjusted figure size
     nx.draw(
         graph,
@@ -124,6 +128,57 @@ def plot_chord_diagram(chord_note_names, key_colors, title):
     plt.axis("off")
     plt.tight_layout()
 
+
+def generate_filename(args):
+    """Generates a descriptive filename based on arguments."""
+    
+    # Define defaults for comparison
+    default_roots = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+    default_types = ["major", "minor", "7", "minor7", "maj7"]
+    default_inversions = [0, 1, 2, 3]
+
+    # Roots part
+    if set(args.roots) == set(default_roots):
+        roots_part = "Roots_All"
+    elif len(args.roots) == 1:
+        roots_part = f"Root_{args.roots[0]}"
+    else:
+        # Limit length if many specific roots are given
+        roots_str = "-".join(args.roots)
+        if len(roots_str) > 20:
+             roots_part = f"Roots_{len(args.roots)}Custom"
+        else:
+             roots_part = f"Roots_{roots_str}"
+             
+    # Types part
+    if set(args.types) == set(default_types):
+        types_part = "Types_All"
+    elif len(args.types) == 1:
+        types_part = f"Type_{args.types[0]}"
+    else:
+        types_str = "-".join(args.types)
+        if len(types_str) > 20:
+             types_part = f"Types_{len(args.types)}Custom"
+        else:
+             types_part = f"Types_{types_str}"
+
+    # Inversions part
+    # Note: actual inversions depend on the chord type, this describes the requested range
+    requested_invs_str = "-".join(map(str, sorted(list(set(args.inversions)))))
+    inversions_part = f"Invs_{requested_invs_str}"
+    if args.skip_root:
+        inversions_part += "_NoRootPos"
+
+    # Combine parts
+    base_filename = f"{roots_part}_{types_part}_{inversions_part}"
+    
+    # Sanitize filename: replace '#' with 's', remove other invalid chars
+    sanitized_filename = base_filename.replace("#", "s")
+    sanitized_filename = re.sub(r'[\\/*?:"<>|]', "", sanitized_filename)
+
+    return f"{sanitized_filename}.pdf"
+
+
 # --- Main Execution ---
 
 def main():
@@ -136,68 +191,87 @@ def main():
     parser.add_argument("-t", "--types", nargs='+', default=["major", "minor", "7", "minor7", "maj7"],
                         help="List of chord types (e.g., major 7 maj7). Defaults to major, minor, 7, minor7, maj7.")
     parser.add_argument("-i", "--inversions", type=int, nargs='+', default=[0, 1, 2, 3],
-                        help="List of inversion numbers (e.g., 0 1 2). Defaults to 0, 1, 2, 3.")
-    parser.add_argument("-o", "--output", default="chord_diagrams.pdf",
-                        help="Output PDF filename. Defaults to 'chord_diagrams.pdf'.")
+                        help="List of inversion numbers (e.g., 0 1 2). Max valid inversion depends on chord type. Defaults to 0, 1, 2, 3.")
+    parser.add_argument("-o", "--output", default=None, # Default to None, indicating auto-generate
+                        help="Output PDF filename. If omitted, a descriptive name is generated automatically.")
     parser.add_argument("--skip-root", action='store_true',
                         help="Skip generating root position chords (only generate inversions).")
 
 
     args = parser.parse_args()
 
+    # --- Filename Generation ---
+    if args.output is None:
+        output_filename = generate_filename(args)
+    else:
+        # Use user-provided name, ensure it ends with .pdf
+        output_filename = args.output
+        if not output_filename.lower().endswith(".pdf"):
+            output_filename += ".pdf"
+    # -------------------------
+
     # Validate chord types and roots from arguments
     valid_types = {"major", "minor", "7", "minor7", "maj7"}
     valid_roots = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"}
 
-    for chord_type in args.types:
-        if chord_type not in valid_types:
-            logging.error(f"Invalid chord type specified: {chord_type}. Valid types are: {', '.join(valid_types)}")
-            return # Exit if invalid type
-    for root in args.roots:
-         if root not in valid_roots:
-             logging.error(f"Invalid root note specified: {root}. Valid roots are: {', '.join(valid_roots)}")
-             return # Exit if invalid root
+    # Filter invalid types/roots specified by user
+    requested_roots = [r for r in args.roots if r in valid_roots]
+    invalid_roots = [r for r in args.roots if r not in valid_roots]
+    if invalid_roots:
+        logging.warning(f"Ignoring invalid root notes specified: {', '.join(invalid_roots)}")
+
+    requested_types = [t for t in args.types if t in valid_types]
+    invalid_types = [t for t in args.types if t not in valid_types]
+    if invalid_types:
+         logging.warning(f"Ignoring invalid chord types specified: {', '.join(invalid_types)}")
+
+    if not requested_roots or not requested_types:
+        logging.error("No valid roots or types specified. Exiting.")
+        return
 
 
-    logging.info(f"Generating diagrams for roots: {', '.join(args.roots)}")
-    logging.info(f"Chord types: {', '.join(args.types)}")
-    logging.info(f"Inversions: {', '.join(map(str, args.inversions))}")
-    logging.info(f"Output file: {args.output}")
+    logging.info(f"Generating diagrams for roots: {', '.join(requested_roots)}")
+    logging.info(f"Chord types: {', '.join(requested_types)}")
+    logging.info(f"Requested inversions: {', '.join(map(str, sorted(list(set(args.inversions)))))}")
+    logging.info(f"Output file: {output_filename}") # Log the final filename
 
     count = 0
-    with PdfPages(args.output) as pdf:
-        for root in args.roots:
-            for chord_type in args.types:
-                # Determine which inversions to generate for this chord type
+    # Use the generated or specified filename
+    with PdfPages(output_filename) as pdf:
+        for root in requested_roots:
+            for chord_type in requested_types:
+                # Determine number of notes for inversion validation
                 num_notes = len({
                     "major": [0, 4, 7], "minor": [0, 3, 7], "7": [0, 4, 7, 10],
                     "minor7": [0, 3, 7, 10], "maj7": [0, 4, 7, 11]
                 }[chord_type])
+
+                # Filter requested inversions to only valid ones for this chord type
+                valid_requested_inversions = [inv for inv in args.inversions if 0 <= inv < num_notes]
+
+                if args.skip_root and 0 in valid_requested_inversions:
+                     valid_requested_inversions.remove(0)
                 
-                active_inversions = [inv for inv in args.inversions if inv < num_notes]
-                if args.skip_root and 0 in active_inversions:
-                     active_inversions.remove(0)
-                if not args.skip_root and 0 not in active_inversions : # Ensure root is added if not skipped and not present
-                     active_inversions.insert(0,0)
-                
-                active_inversions = sorted(list(set(active_inversions))) # Unique & sorted
+                active_inversions = sorted(list(set(valid_requested_inversions))) # Unique & sorted
 
 
                 for inversion in active_inversions:
                     try:
                         notes, keys, title = generate_chord_structure(root, chord_type, inversion)
+                        # Plotting happens INSIDE plot_chord_diagram now
                         plot_chord_diagram(notes, keys, title)
                         pdf.savefig(bbox_inches="tight") # Save the current figure to the PDF
                         plt.close() # Close the figure to free memory
                         count += 1
                         logging.info(f"Generated: {title}")
                     except ValueError as e:
+                        # Log value errors (like invalid inversion for chord type) which might occur here
                         logging.error(f"Could not generate '{root} {chord_type}' (Inversion {inversion}): {e}")
                     except Exception as e:
-                        logging.error(f"An unexpected error occurred generating '{root} {chord_type}' (Inversion {inversion}): {e}")
+                        logging.error(f"An unexpected error occurred generating '{root} {chord_type}' (Inversion {inversion}): {e}", exc_info=True) # Log full traceback for unexpected errors
 
 
-    logging.info(f"Finished! Created {args.output} containing {count} chord diagrams.")
+    logging.info(f"Finished! Created {output_filename} containing {count} chord diagrams.")
 
 if __name__ == "__main__":
     main()
