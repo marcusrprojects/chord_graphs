@@ -1,5 +1,8 @@
 # Chord Diagram Generator
 
+![Python](https://img.shields.io/badge/Python-3.8%2B-blue.svg)
+![Platform](https://img.shields.io/badge/Platform-cross--platform-lightgrey)
+
 This Python script generates visual diagrams of musical chords based on specified root notes, chord types, and inversions—or from a custom list of chord names. Output diagrams can be saved as a single multi-page PDF or as individual image files (PNG or JPG).
 
 ![Example Chord Diagram](examples/B_maj7_Inversion_2.png)
