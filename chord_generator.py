@@ -11,8 +11,8 @@ import re # Import regex module for sanitizing filenames
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# --- Core Chord Logic ---
 
+# --- Core Chord Logic ---
 def generate_chord_structure(root, chord_type, inversion=0):
     """
     Generates the notes and structure for a given musical chord.
@@ -54,7 +54,7 @@ def generate_chord_structure(root, chord_type, inversion=0):
     # Ensure inversion is valid for the number of notes (e.g., inversion 3 doesn't exist for a triad)
     if inversion >= num_notes:
          raise ValueError(f"Inversion {inversion} is invalid for a {num_notes}-note chord ({chord_type})")
-    
+
     actual_inversion = inversion # No modulo needed if we validate first
 
     for _ in range(actual_inversion):
@@ -71,6 +71,7 @@ def generate_chord_structure(root, chord_type, inversion=0):
     title = f"{root} {chord_type} {inversion_str}"
 
     return chord_note_names, key_colors, title
+
 
 def plot_chord_diagram(chord_note_names, key_colors, title):
     """
@@ -125,13 +126,16 @@ def plot_chord_diagram(chord_note_names, key_colors, title):
         )
 
     plt.title(title, color="gray", fontsize=20, pad=20)
-    plt.axis("off")
     plt.tight_layout()
 
+    current_ylim = plt.ylim()
+    # Add a buffer to the top and bottom limits
+    plt.ylim(current_ylim[0] - 0.1, current_ylim[1] + 0.1)
+    plt.axis("off") # Turn off axis AFTER adjusting limits
 
 def generate_filename(args):
     """Generates a descriptive filename based on arguments."""
-    
+
     # Define defaults for comparison
     default_roots = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
     default_types = ["major", "minor", "7", "minor7", "maj7"]
@@ -149,7 +153,7 @@ def generate_filename(args):
              roots_part = f"Roots_{len(args.roots)}Custom"
         else:
              roots_part = f"Roots_{roots_str}"
-             
+
     # Types part
     if set(args.types) == set(default_types):
         types_part = "Types_All"
@@ -171,16 +175,14 @@ def generate_filename(args):
 
     # Combine parts
     base_filename = f"{roots_part}_{types_part}_{inversions_part}"
-    
+
     # Sanitize filename: replace '#' with 's', remove other invalid chars
     sanitized_filename = base_filename.replace("#", "s")
     sanitized_filename = re.sub(r'[\\/*?:"<>|]', "", sanitized_filename)
 
     return f"{sanitized_filename}.pdf"
 
-
 # --- Main Execution ---
-
 def main():
     """
     Main function to parse arguments and generate chord diagrams.
@@ -251,7 +253,7 @@ def main():
 
                 if args.skip_root and 0 in valid_requested_inversions:
                      valid_requested_inversions.remove(0)
-                
+
                 active_inversions = sorted(list(set(valid_requested_inversions))) # Unique & sorted
 
 
@@ -272,6 +274,7 @@ def main():
 
 
     logging.info(f"Finished! Created {output_filename} containing {count} chord diagrams.")
+
 
 if __name__ == "__main__":
     main()
