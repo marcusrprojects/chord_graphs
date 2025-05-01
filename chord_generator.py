@@ -37,15 +37,10 @@ VALID_ROOTS = set(CHROMATIC_SCALE)
 
 def sanitize_filename(text: str) -> str:
     """Removes or replaces characters invalid for filenames."""
-    # Replace # with s (for sharp)
     text = text.replace("#", "s")
-    # Replace spaces and parentheses with underscores
     text = re.sub(r"[ \(\)]+", "_", text)
-    # Remove any remaining characters that are not alphanumeric, underscore, or hyphen
     text = re.sub(r"[^a-zA-Z0-9_\-]", "", text)
-    # Collapse multiple underscores
     text = re.sub(r"_+", "_", text)
-    # Remove leading/trailing underscores
     text = text.strip('_')
     return text
 
@@ -129,36 +124,27 @@ def plot_chord_diagram(chord_note_names, key_colors, title):
     node_ids = list(graph.nodes())
     for i in range(len(node_ids) - 1):
         graph.add_edge(node_ids[i], node_ids[i+1])
-    # Create a new figure context for each plot
     fig = plt.figure(figsize=(8, 4))
     nx.draw(
-        graph,
-        pos=positions,
-        with_labels=False,
-        node_size=2500,
-        node_color=node_colors_map,
-        edge_color="gray",
-        width=1.5,
+        graph, pos=positions, with_labels=False, node_size=2500,
+        node_color=node_colors_map, edge_color="gray", width=1.5,
     )
     for node_id, (x, y) in positions.items():
         node_attr = graph.nodes[node_id]
         plt.text(
-            x, y, node_attr['label'],
-            fontsize=14, fontweight='bold', ha="center", va="center",
-            color=node_attr['text_color']
+            x, y, node_attr['label'], fontsize=14, fontweight='bold',
+            ha="center", va="center", color=node_attr['text_color']
         )
     plt.title(title, color="gray", fontsize=20, pad=20)
     plt.tight_layout()
     current_ylim = plt.ylim()
-    plt.ylim(current_ylim[0] - 0.1, current_ylim[1] + 0.1)
+    plt.ylim(current_ylim[0] - 0.3, current_ylim[1] + 0.3)
     plt.axis("off")
-    # Return the figure object so it can be saved by the caller
     return fig
 
 
-def generate_pdf_base_name(args):
-    """Generates a descriptive base filename for the PDF output."""
-    # If specific chords are given, use a simpler naming scheme
+def generate_output_base_name(args):
+    """Generates a descriptive base filename/subdirectory name based on arguments."""
     if args.chords:
         prefix = "CustomChords"
         if args.chords:
@@ -185,30 +171,23 @@ def generate_pdf_base_name(args):
         inversions_part += "_NoRootPos"
 
     base_filename = f"{roots_part}_{types_part}_{inversions_part}"
-    # Sanitize the combined name as well
     return sanitize_filename(base_filename)
 
 # --- Main Execution ---
 def main():
     parser = argparse.ArgumentParser(
         description="Generate musical chord diagrams. Provide EITHER --chords OR combination flags (-r, -t, -i).",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter # Show defaults in help
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
-    # Input Modes
     input_group = parser.add_mutually_exclusive_group()
     input_group.add_argument("-c", "--chords", nargs='+',
                              help="List of specific chord strings (e.g., 'Cmaj7' 'G7/B' 'Am').")
-    # Combination Mode (will be ignored if --chords is used, but defined for defaults)
     parser.add_argument("-r", "--roots", nargs='+', default=CHROMATIC_SCALE, help="List of root notes for combination mode.")
     parser.add_argument("-t", "--types", nargs='+', default=list(INTERVALS.keys()), help="List of chord types for combination mode.")
     parser.add_argument("-i", "--inversions", type=int, nargs='+', default=[0, 1, 2, 3], help="List of inversion numbers for combination mode.")
     parser.add_argument("--skip-root", action='store_true', help="Skip root position in combination mode.")
-
-    # Output Options
-    parser.add_argument("--format", choices=['pdf', 'png', 'jpg'], default='pdf',
-                        help="Output format.")
-    parser.add_argument("--output-dir", default='./chord_graphs',
-                        help="Directory to save output file(s).")
+    parser.add_argument("--format", choices=['pdf', 'png', 'jpg'], default='pdf', help="Output format.")
+    parser.add_argument("--output-dir", default='./chord_graphs', help="Base directory to save output file(s) or image subdirectory.") # Changed default
 
     args = parser.parse_args()
 
@@ -217,7 +196,6 @@ def main():
     is_combination_mode = not args.chords
 
     if args.chords:
-        # Specific Chords Mode
         logging.info(f"Processing specific chords: {', '.join(args.chords)}")
         for chord_str in args.chords:
             parsed = parse_chord_string(chord_str)
@@ -226,22 +204,16 @@ def main():
             else:
                 logging.warning(f"Skipping unparseable chord: '{chord_str}'")
     else:
-        # Combination Mode
-        # Check if defaults were used (to avoid logging giant lists)
         roots_to_log = args.roots if len(args.roots) < len(CHROMATIC_SCALE) else ['All Defaults']
         types_to_log = args.types if len(args.types) < len(INTERVALS) else ['All Defaults']
         logging.info(f"Generating combinations for roots: {', '.join(roots_to_log)}")
         logging.info(f"Chord types: {', '.join(types_to_log)}")
         logging.info(f"Requested inversions: {', '.join(map(str, sorted(list(set(args.inversions)))))}")
-
-        # Filter invalid types/roots (shouldn't happen with defaults, but good practice)
         requested_roots = [r for r in args.roots if r in VALID_ROOTS]
         requested_types = [t for t in args.types if t in VALID_TYPES]
-
         if not requested_roots or not requested_types:
             logging.error("No valid roots or types available for combination mode. Exiting.")
             return
-
         for root in requested_roots:
             for chord_type in requested_types:
                 num_notes = len(INTERVALS[chord_type])
@@ -256,62 +228,73 @@ def main():
         logging.error("No valid chords to generate. Exiting.")
         return
 
-    # --- Prepare Output Directory ---
+    # --- Prepare Base Output Directory ---
+    # This directory always gets created. Subdirectory is created only for image formats.
     try:
         os.makedirs(args.output_dir, exist_ok=True)
-        logging.info(f"Ensured output directory exists: {args.output_dir}")
+        logging.info(f"Using base output directory: {args.output_dir}")
     except OSError as e:
-        logging.error(f"Could not create output directory '{args.output_dir}': {e}")
+        logging.error(f"Could not create base output directory '{args.output_dir}': {e}")
         return
 
     # --- Generate and Save Output ---
     count = 0
+    output_base_name = generate_output_base_name(args) # Used for PDF name & image subdir name
+
     if args.format == 'pdf':
-        # PDF Mode: Generate base name and save all to one file
-        pdf_base_name = generate_pdf_base_name(args)
-        pdf_filepath = os.path.join(args.output_dir, f"{pdf_base_name}.pdf")
+        # PDF Mode: Save all to one file in the base output directory
+        pdf_filepath = os.path.join(args.output_dir, f"{output_base_name}.pdf")
         logging.info(f"Generating PDF: {pdf_filepath}")
         try:
             with PdfPages(pdf_filepath) as pdf:
                 for root, chord_type, inversion in chords_to_process:
                     try:
                         notes, keys, title = generate_chord_structure(root, chord_type, inversion)
-                        fig = plot_chord_diagram(notes, keys, title) # Get the figure object
-                        pdf.savefig(fig, bbox_inches="tight") # Save the figure to PDF
-                        plt.close(fig) # Close the specific figure
+                        fig = plot_chord_diagram(notes, keys, title)
+                        pdf.savefig(fig, bbox_inches="tight")
+                        plt.close(fig)
                         count += 1
                         logging.info(f"Added diagram to PDF: {title}")
-                    except ValueError as e:
-                        logging.error(f"Skipping chord {root} {chord_type} inv{inversion} for PDF: {e}")
-                    except Exception as e:
-                        logging.error(f"Unexpected PDF generation error for {root} {chord_type} inv{inversion}: {e}", exc_info=True)
+                    except ValueError as e: logging.error(f"Skipping chord {root} {chord_type} inv{inversion} for PDF: {e}")
+                    except Exception as e: logging.error(f"Unexpected PDF generation error for {root} {chord_type} inv{inversion}: {e}", exc_info=True)
+
         except Exception as e:
              logging.error(f"Failed to open or write PDF file '{pdf_filepath}': {e}")
              return
 
     else:
-        # Image Mode (PNG/JPG): Save each plot individually
-        logging.info(f"Generating individual {args.format.upper()} files in: {args.output_dir}")
+        # Image Mode (PNG/JPG): Create a subdirectory and save each plot individually
+        image_subdir = os.path.join(args.output_dir, output_base_name) # Subdir name based on content
+        try:
+            os.makedirs(image_subdir, exist_ok=True)
+            logging.info(f"Generating individual {args.format.upper()} files in subdirectory: {image_subdir}")
+        except OSError as e:
+            logging.error(f"Could not create image subdirectory '{image_subdir}': {e}")
+            return
+
         for root, chord_type, inversion in chords_to_process:
              try:
                 notes, keys, title = generate_chord_structure(root, chord_type, inversion)
-                fig = plot_chord_diagram(notes, keys, title) # Get the figure object
+                fig = plot_chord_diagram(notes, keys, title)
 
-                # Create individual filename
+                # Create individual filename inside the subdirectory
                 img_filename = sanitize_filename(title) + f".{args.format}"
-                img_filepath = os.path.join(args.output_dir, img_filename)
+                img_filepath = os.path.join(image_subdir, img_filename) # Path includes subdir
 
-                # Save the individual figure
                 fig.savefig(img_filepath, format=args.format, bbox_inches="tight")
-                plt.close(fig) # Close the specific figure
+                plt.close(fig)
                 count += 1
                 logging.info(f"Saved image: {img_filepath}")
-             except ValueError as e:
-                 logging.error(f"Skipping image for chord {root} {chord_type} inv{inversion}: {e}")
-             except Exception as e:
-                 logging.error(f"Unexpected image generation error for {root} {chord_type} inv{inversion}: {e}", exc_info=True)
+             # ... (Error handling remains the same)
+             except ValueError as e: logging.error(f"Skipping image for chord {root} {chord_type} inv{inversion}: {e}")
+             except Exception as e: logging.error(f"Unexpected image generation error for {root} {chord_type} inv{inversion}: {e}", exc_info=True)
 
-    logging.info(f"Finished! Generated {count} diagram(s) in '{args.output_dir}' as {args.format.upper()}.")
+
+    # --- Final Log Message ---
+    final_location = f"file '{os.path.join(args.output_dir, f'{output_base_name}.pdf')}'" if args.format == 'pdf' \
+                else f"subdirectory '{os.path.join(args.output_dir, output_base_name)}'"
+
+    logging.info(f"Finished! Generated {count} diagram(s) as {args.format.upper()} in {final_location}.")
 
 
 if __name__ == "__main__":
